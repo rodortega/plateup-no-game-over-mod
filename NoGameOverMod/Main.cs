@@ -122,17 +122,22 @@ namespace NoGameOver
         protected override void OnUpdate()
         {
             if (!HalveMoneyTracker.ShouldHalveMoney)
+            {
                 return;
-
+            }
 
             if (MoneyQuery.IsEmptyIgnoreFilter)
+            {
                 return;
+            }
 
             Entity moneyEntity = MoneyQuery.GetSingletonEntity();
             SMoney money = EntityManager.GetComponentData<SMoney>(moneyEntity);
 
             if (money.Amount <= 0)
+            {
                 return;
+            }
 
             money.Amount /= 2;
             EntityManager.SetComponentData(moneyEntity, money);
