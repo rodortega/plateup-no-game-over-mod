@@ -1,0 +1,7 @@
+{
+    "Name": "RetryOnFailMod",
+    "Author": "Rod",
+    "Version": "1.0.0",
+    "Description": "Provides options to retry the day upon failure with monetary penalties.",
+    "Dependencies": [ "KitchenLib" ]
+}
