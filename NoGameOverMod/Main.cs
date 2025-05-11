@@ -19,67 +19,69 @@ namespace NoGameOver
         }
 
         public void PreInject() { }
-
         public void PostInject() { }
+    }
+
+    public static class HalveMoneyTracker
+    {
+        public static bool ShouldHalveMoney = false;
     }
 
     [UpdateBefore(typeof(CheckGameOverFromLife))]
     public class AutoRestart : CheckGameOverFromLife, IModSystem
     {
         private EntityQuery Patience;
-        [ReadOnly]
-        private EntityQuery OriginalKitchenStatus;
+        [ReadOnly] private EntityQuery OriginalKitchenStatus;
         private EntityQuery CurrentKitchenStatus;
-        private EntityQuery MoneyQuery;
 
         protected override void Initialise()
         {
             base.Initialise();
-
             Patience = GetEntityQuery(typeof(CPatience));
             OriginalKitchenStatus = GetEntityQuery(ComponentType.ReadOnly<SKitchenStatus>());
             CurrentKitchenStatus = GetEntityQuery(ComponentType.ReadWrite<SKitchenStatus>());
-            MoneyQuery = GetEntityQuery(ComponentType.ReadWrite<SMoney>());
         }
 
         protected override void OnUpdate()
         {
-            SKitchenStatus singleton = OriginalKitchenStatus.GetSingleton<SKitchenStatus>();
+            SKitchenStatus status = OriginalKitchenStatus.GetSingleton<SKitchenStatus>();
 
-            if (singleton.RemainingLives <= 0 && !Has<SPracticeMode>() && !RescuedByAppliance())
+            if (status.RemainingLives <= 0 && !Has<SPracticeMode>() && !RescuedByAppliance())
             {
-                ShowDayRestart();
+                TriggerRestart();
             }
         }
 
         private bool RescuedByAppliance()
         {
-            SKitchenStatus singleton = OriginalKitchenStatus.GetSingleton<SKitchenStatus>();
-            EntityQuery entityQuery = GetEntityQuery(new QueryHelper().All(typeof(CPreventGameOver)).None(typeof(CPreventGameOverConsumed)));
+            var status = OriginalKitchenStatus.GetSingleton<SKitchenStatus>();
+            var rescueQuery = GetEntityQuery(new QueryHelper().All(typeof(CPreventGameOver)).None(typeof(CPreventGameOverConsumed)));
 
-            if (!entityQuery.IsEmpty)
+            if (!rescueQuery.IsEmpty)
             {
-                base.EntityManager.AddComponent<CPreventGameOverConsumed>(entityQuery.First());
+                EntityManager.AddComponent<CPreventGameOverConsumed>(rescueQuery.First());
+
                 CurrentKitchenStatus.SetSingleton(new SKitchenStatus
                 {
                     RemainingLives = 1,
-                    TotalLives = singleton.TotalLives
+                    TotalLives = status.TotalLives
                 });
-                NativeArray<Entity> nativeArray = Patience.ToEntityArray(Allocator.Temp);
+
+                NativeArray<Entity> patienceEntities = Patience.ToEntityArray(Allocator.Temp);
                 try
                 {
-                    foreach (Entity item in nativeArray)
+                    foreach (var entity in patienceEntities)
                     {
-                        if (Require<CPatience>(item, out CPatience comp))
+                        if (Require(entity, out CPatience patience))
                         {
-                            comp.ResetTime();
-                            Set(item, comp);
+                            patience.ResetTime();
+                            Set(entity, patience);
                         }
                     }
                 }
                 finally
                 {
-                    nativeArray.Dispose();
+                    patienceEntities.Dispose();
                 }
 
                 return true;
@@ -87,31 +89,55 @@ namespace NoGameOver
             return false;
         }
 
-        private void ShowDayRestart()
+        private void TriggerRestart()
         {
-            SKitchenStatus singleton = OriginalKitchenStatus.GetSingleton<SKitchenStatus>();
-
-            if (!MoneyQuery.IsEmptyIgnoreFilter)
-            {
-                Entity moneyEntity = MoneyQuery.GetSingletonEntity();
-                SMoney money = EntityManager.GetComponentData<SMoney>(moneyEntity);
-
-                int newAmount = money.Amount / 2;
-                money.Amount = newAmount;
-                
-                EntityManager.SetComponentData(moneyEntity, money);
-            }
+            HalveMoneyTracker.ShouldHalveMoney = true;
 
             base.World.Add(new COfferRestartDay
             {
                 Reason = LossReason.Patience
             });
 
+            var status = OriginalKitchenStatus.GetSingleton<SKitchenStatus>();
             CurrentKitchenStatus.SetSingleton(new SKitchenStatus
             {
-                RemainingLives = singleton.TotalLives,
-                TotalLives = singleton.TotalLives
+                RemainingLives = status.TotalLives,
+                TotalLives = status.TotalLives
             });
+        }
+    }
+
+    public class HalveMoneyInPrepPhase : NightSystem, IModSystem
+    {
+        private EntityQuery MoneyQuery;
+
+        protected override void Initialise()
+        {
+            base.Initialise();
+            MoneyQuery = GetEntityQuery(ComponentType.ReadWrite<SMoney>());
+
+            RequireSingletonForUpdate<SMoney>();
+        }
+
+        protected override void OnUpdate()
+        {
+            if (!HalveMoneyTracker.ShouldHalveMoney)
+                return;
+
+
+            if (MoneyQuery.IsEmptyIgnoreFilter)
+                return;
+
+            Entity moneyEntity = MoneyQuery.GetSingletonEntity();
+            SMoney money = EntityManager.GetComponentData<SMoney>(moneyEntity);
+
+            if (money.Amount <= 0)
+                return;
+
+            money.Amount /= 2;
+            EntityManager.SetComponentData(moneyEntity, money);
+
+            HalveMoneyTracker.ShouldHalveMoney = false;
         }
     }
 }
